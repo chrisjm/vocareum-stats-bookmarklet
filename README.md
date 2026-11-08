@@ -58,10 +58,13 @@ Chrome are the most reliable targets.
    - **Add this page** — reads the rows currently on screen and accumulates
      them. Pressing it twice on the same page adds nothing (rows are
      de-duplicated).
-   - **End of Page** — scrolls to the bottom of the page, where the
-     pagination controls usually are.
-   - **Reset** — clears the counters.
-4. The panel shows **Total**, **Started**, **Finished**, and
+   - **Top of Page** / **End of Page** — scroll to the top or bottom of the
+     page, where the rows and the pagination controls sit.
+   - **Previous Page** / **Next Page** — click the table's own pager for you,
+     then scroll to the top. They disable at the first and last page, and
+     **Page N of M** shows where you are.
+   - **Reset** — clears the counters immediately, with no confirmation.
+4. The panel shows **Total Rows**, **Started**, **Finished**, and
    **Currently taking** (Started Y, not Finished Y). No percentage is shown
    because you never see every page, so a percentage would be misleading.
 
@@ -81,7 +84,10 @@ Test the *unminified* source in DevTools, not the generated file.
 2. Paste all of `table-count-manual.js` in and press Enter. Save it as a
    Snippet (Sources panel in Chrome/Edge, Debugger in Firefox) to re-run with
    `Ctrl/Cmd+Enter` after each edit.
-3. Click through **Add this page**, **End of Page**, and **Reset**. Paging on
+3. Click through **Add this page**, **Top of Page**, **End of Page**,
+   **Previous Page**, **Next Page**, and **Reset**. Previous/Next should move
+   one page and scroll to the top, the **Page N of M** indicator should track
+   the pager, and both should disable at the first and last page. Paging on
    and pressing **Add this page** again should raise the total; pressing it
    twice on the same page should not.
 4. `window.__rowcounts` gives `{ summary, startedValues, finishedValues, rows }`
