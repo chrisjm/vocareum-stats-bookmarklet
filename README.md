@@ -71,10 +71,12 @@ Chrome are the most reliable targets.
 Console detail (`window.__rowcounts`) holds the full breakdown, including the
 distinct values seen in each column, backing up the "cells not Y/N" notice.
 
-Privacy: no name is ever stored, printed, or copied. Rows are keyed by an
-opaque id or short non-cryptographic hash; state lives in `sessionStorage`
-under `rowcounts.v2:<pathname>` and only the fields `{ key, started,
-finished }` are persisted.
+Privacy: rows are keyed by the submission id carried in the row's select
+checkbox (`value`). The same checkbox's `aria-label` holds the student's name
+and is never read — no cell text is used to identify a row — so no name is
+ever stored, printed, or copied. State lives in `sessionStorage` under
+`rowcounts.v2:<pathname>` and only the fields `{ key, started, finished }` are
+persisted.
 
 ## Testing with the Web Inspector
 

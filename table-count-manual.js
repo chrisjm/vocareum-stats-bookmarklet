@@ -1,37 +1,36 @@
 /*
  * table-count-manual.js
  *
- * Manual tally for a paginated submissions table: totals rows and counts how
+ * Manual tally for a paginated submissions table: counts the rows, and how
  * many have a literal "Y" in the Started column and how many have a literal
- * "Y" in the Finished column. "Currently taking" is Started Y, not Finished Y.
+ * "Y" in the Finished column. "Currently taking" means Started Y and not
+ * Finished Y.
  *
- * No percentage is tracked: we never see every page, so a percentage would be
- * meaningless.
- *
- * You do all the paging and all the clicking. This only reads the rows that are
- * on screen when you press "Add this page".
+ * You do all the paging and all the clicking. The script reads only the rows
+ * that are on screen when you press "Add this page".
  *
  * Usage:
  *   - Run once on the submissions page (DevTools snippet, or the javascript:
  *     bookmarklet in table-count-manual.txt).
- *   - Page through however you like: "Previous Page" and "Next Page" click the
- *     table's own pager for you and jump to the top, or scroll yourself with
- *     "Top of Page" / "End of Page".
+ *   - Page through with "Previous Page" / "Next Page" (which click the table's
+ *     own pager and jump to the top), or scroll with "Top of Page" /
+ *     "End of Page".
  *   - Press "Add this page" on each page. Pressing it twice on the same page
  *     adds nothing (rows are de-duplicated).
  *
- * Privacy:
- *   - No name is ever stored, printed, or copied.
- *   - The de-duplication key is a numeric user id when one can be found (an id
- *     column, a number inside the User cell's link, or a numeric User cell).
- *     Only when there is no id at all is the User cell text read, and then only
- *     far enough to reduce it to a short non-cryptographic hash. The name itself
- *     is never assigned to a variable that outlives that expression, never
- *     written anywhere, and never printed. Either way what is stored is an
- *     opaque key like "id:1234" or "h:9f3a1c".
- *   - Only the three fields { key, started, finished } are ever persisted.
- *   - Any v1 state written by the previous version of this script is deleted.
+ * Row identity:
+ *   Each row's select checkbox carries the submission id in its value:
  *
+ *     <input class="row-select" value="5402615"
+ *            aria-label="Select submission from ...">
+ *
+ *   The numeric value is the de-duplication key, stored as
+ *   "submission:5402615". Only the value attribute is read. The aria-label
+ *   holds the student's name and is never read; no name is ever stored,
+ *   printed, or copied. A row with no such checkbox falls back to the table's
+ *   own data-dt-row index, then to its position on the page.
+ *
+ * Persisted: only { key, started, finished } per row.
  * State: sessionStorage key "rowcounts.v2:<pathname>"
  * Console: window.__rowcounts = { summary, startedValues, finishedValues, rows }
  */
@@ -39,90 +38,73 @@
   'use strict';
 
   var PANEL_ID = 'rowcounts-panel';
-  var STORE_PREFIX = 'rowcounts.v2:';
-  var LEGACY_PREFIX = 'rowcounts.v1:';
-  var SKU = STORE_PREFIX + location.pathname;
-  var CFG = { started: 'Started', finished: 'Finished', user: 'User' };
+  var STATE_PREFIX = 'rowcounts.v2:';
+  var STATE_KEY = STATE_PREFIX + location.pathname;
+  var COLUMN_HEADERS = { started: 'Started', finished: 'Finished' };
+  var SUBMISSION_CHECKBOX = 'input.row-select';
 
-  var clean = function (s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); };
-  var textOf = function (el) { return el ? clean(el.innerText || el.textContent) : ''; };
-
-  var scrubLegacy = function () {
-    try { sessionStorage.removeItem(LEGACY_PREFIX + location.pathname); } catch (e) {}
+  var normaliseText = function (value) {
+    return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
   };
+  var cellText = function (cell) { return cell ? normaliseText(cell.innerText || cell.textContent) : ''; };
 
   /* ---------------- storage ---------------- */
-  var load = function () {
+  var loadState = function () {
     try {
-      var raw = sessionStorage.getItem(SKU);
-      var parsed = raw ? JSON.parse(raw) : null;
-      if (parsed && Array.isArray(parsed.rows)) {
+      var stored = sessionStorage.getItem(STATE_KEY);
+      var savedState = stored ? JSON.parse(stored) : null;
+      if (savedState && Array.isArray(savedState.rows)) {
         return {
-          rows: parsed.rows.filter(function (r) {
-            return r && typeof r.key === 'string' && typeof r.started === 'string' && typeof r.finished === 'string';
-          }).map(function (r) {
-            return { key: r.key, started: r.started, finished: r.finished };
+          rows: savedState.rows.filter(function (row) {
+            return row && typeof row.key === 'string' && typeof row.started === 'string' && typeof row.finished === 'string';
+          }).map(function (row) {
+            return { key: row.key, started: row.started, finished: row.finished };
           })
         };
       }
-    } catch (e) {}
+    } catch (error) {}
     return { rows: [] };
   };
-  var save = function (state) {
-    try { sessionStorage.setItem(SKU, JSON.stringify({ rows: state.rows })); } catch (e) {}
+
+  var saveState = function (state) {
+    try { sessionStorage.setItem(STATE_KEY, JSON.stringify({ rows: state.rows })); } catch (error) {}
   };
 
   /* ---------------- table + columns ---------------- */
   var pickTable = function () {
     var tables = Array.prototype.slice.call(document.querySelectorAll('table'));
     if (!tables.length) return null;
-    var size = function (t) { return t.tBodies[0] ? t.tBodies[0].rows.length : 0; };
-    tables.sort(function (a, b) { return size(b) - size(a); });
+    var rowCount = function (table) { return table.tBodies[0] ? table.tBodies[0].rows.length : 0; };
+    tables.sort(function (a, b) { return rowCount(b) - rowCount(a); });
     return tables[0];
   };
 
-  var findCol = function (headers, name) {
-    var lower = name.toLowerCase();
+  var findColumn = function (headers, name) {
+    var wanted = name.toLowerCase();
     var exact = -1;
-    var loose = -1;
+    var partial = -1;
     for (var i = 0; i < headers.length; i++) {
-      var h = headers[i].toLowerCase();
-      if (h === lower && exact < 0) exact = i;
-      if (loose < 0 && h.indexOf(lower) !== -1) loose = i;
+      var header = headers[i].toLowerCase();
+      if (header === wanted && exact < 0) exact = i;
+      if (partial < 0 && header.indexOf(wanted) !== -1) partial = i;
     }
-    return exact >= 0 ? exact : loose;
+    return exact >= 0 ? exact : partial;
   };
 
-  var findIdCol = function (headers) {
-    for (var i = 0; i < headers.length; i++) {
-      if (/(^|[^a-z])id([^a-z]|$)/i.test(headers[i])) return i;
-    }
-    return -1;
+  /* ---------------- row identity ---------------- */
+  var submissionIdFromRow = function (row) {
+    var checkbox = row.querySelector(SUBMISSION_CHECKBOX);
+    if (!checkbox) return '';
+    var value = normaliseText(checkbox.value);
+    return /^\d+$/.test(value) ? value : '';
   };
 
-  /* ---------------- opaque de-duplication key ---------------- */
-  var hash = function (s) {
-    var h = 5381;
-    for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
-    return h.toString(36);
-  };
-
-  var idFromUserCell = function (td) {
-    if (!td) return '';
-    var link = td.querySelector('a[href]');
-    if (link) {
-      var href = link.getAttribute('href') || '';
-      var nums = href.match(/\d{2,}/g);
-      if (nums && nums.length) return 'id:' + nums[nums.length - 1];
-    }
-    var holder = td.querySelector('[data-user-id],[data-student-id],[data-id]');
-    if (holder) {
-      var v = holder.getAttribute('data-user-id') || holder.getAttribute('data-student-id') || holder.getAttribute('data-id');
-      if (v && /^\d+$/.test(clean(v))) return 'id:' + clean(v);
-    }
-    var text = textOf(td);
-    if (/^\d+$/.test(text)) return 'id:' + text;
-    return '';
+  var rowKey = function (row, rowIndex) {
+    var submissionId = submissionIdFromRow(row);
+    if (submissionId) return 'submission:' + submissionId;
+    var tableRowIndex = row.getAttribute('data-dt-row');
+    if (tableRowIndex !== null) return 'row:' + tableRowIndex;
+    return 'position:' + rowIndex;
   };
 
   /* ---------------- scrape the visible page ---------------- */
@@ -133,40 +115,26 @@
     if (!tbody) return { error: 'That table has no <tbody>.' };
 
     var headerRow = table.tHead ? table.tHead.rows[0] : null;
-    var headers = headerRow ? Array.prototype.map.call(headerRow.cells, function (c) { return textOf(c); }) : [];
-    var iS = findCol(headers, CFG.started);
-    var iF = findCol(headers, CFG.finished);
-    if (iS < 0 && iF < 0) {
+    var headers = headerRow ? Array.prototype.map.call(headerRow.cells, function (cell) { return cellText(cell); }) : [];
+    var startedColumn = findColumn(headers, COLUMN_HEADERS.started);
+    var finishedColumn = findColumn(headers, COLUMN_HEADERS.finished);
+    if (startedColumn < 0 && finishedColumn < 0) {
       return { error: 'Could not find Started/Finished columns. Headers: ' + headers.join(' | ') };
     }
 
-    var iId = findIdCol(headers);
-    var iU = findCol(headers, CFG.user);
-    var minCells = Math.max(iS, iF, 1);
+    var requiredCells = Math.max(startedColumn, finishedColumn) + 1;
 
-    var trs = Array.prototype.filter.call(tbody.rows, function (tr) {
-      if (tr.classList.contains('child') || tr.classList.contains('dt-hasChild')) return false;
-      if (tr.classList.contains('dt-empty') || tr.classList.contains('empty')) return false;
-      return tr.cells.length >= minCells;
+    var dataRows = Array.prototype.filter.call(tbody.rows, function (row) {
+      if (row.classList.contains('child') || row.classList.contains('dt-hasChild')) return false;
+      if (row.classList.contains('dt-empty') || row.classList.contains('empty')) return false;
+      return row.cells.length >= requiredCells;
     });
 
-    var rows = trs.map(function (tr) {
-      var key = '';
-      if (iId >= 0 && /^\d+$/.test(textOf(tr.cells[iId]))) key = 'id:' + textOf(tr.cells[iId]);
-      if (!key && iU >= 0) key = idFromUserCell(tr.cells[iU]);
-      if (!key && iU >= 0) key = 'h:' + hash(textOf(tr.cells[iU]));
-      if (!key) {
-        var parts = [];
-        for (var c = 0; c < tr.cells.length; c++) {
-          if (c === iU) continue;
-          parts.push(textOf(tr.cells[c]));
-        }
-        key = 'h:' + hash(parts.join('|'));
-      }
+    var rows = dataRows.map(function (row, rowIndex) {
       return {
-        key: key,
-        started: iS >= 0 ? textOf(tr.cells[iS]) : '',
-        finished: iF >= 0 ? textOf(tr.cells[iF]) : ''
+        key: rowKey(row, rowIndex),
+        started: startedColumn >= 0 ? cellText(row.cells[startedColumn]) : '',
+        finished: finishedColumn >= 0 ? cellText(row.cells[finishedColumn]) : ''
       };
     });
 
@@ -174,126 +142,134 @@
   };
 
   /* ---------------- classify: literal Y only ---------------- */
-  var isY = function (v) { return clean(v).toUpperCase() === 'Y'; };
-  var isN = function (v) { return clean(v).toUpperCase() === 'N'; };
-  var isOther = function (v) { return !isY(v) && !isN(v); };
+  var isYes = function (value) { return normaliseText(value).toUpperCase() === 'Y'; };
+  var isNo = function (value) { return normaliseText(value).toUpperCase() === 'N'; };
+  var isUnrecognised = function (value) { return !isYes(value) && !isNo(value); };
 
   var summarise = function (rows) {
-    var total = rows.length;
-    var count = function (fn) { return rows.filter(fn).length; };
-    var started = count(function (r) { return isY(r.started); });
-    var finished = count(function (r) { return isY(r.finished); });
+    var count = function (predicate) { return rows.filter(predicate).length; };
+    var started = count(function (row) { return isYes(row.started); });
+    var finished = count(function (row) { return isYes(row.finished); });
     return {
-      rows: total,
+      rows: rows.length,
       startedY: started,
       finishedY: finished,
-      startedNotFinished: count(function (r) { return isY(r.started) && !isY(r.finished); }),
-      startedN: count(function (r) { return isN(r.started); }),
-      finishedN: count(function (r) { return isN(r.finished); }),
-      startedOther: count(function (r) { return isOther(r.started); }),
-      finishedOther: count(function (r) { return isOther(r.finished); })
+      startedNotFinished: count(function (row) { return isYes(row.started) && !isYes(row.finished); }),
+      startedN: count(function (row) { return isNo(row.started); }),
+      finishedN: count(function (row) { return isNo(row.finished); }),
+      startedOther: count(function (row) { return isUnrecognised(row.started); }),
+      finishedOther: count(function (row) { return isUnrecognised(row.finished); })
     };
   };
 
-  var frequency = function (rows, key) {
-    var map = new Map();
+  var valueCounts = function (rows, field) {
+    var counts = new Map();
     for (var i = 0; i < rows.length; i++) {
-      var k = rows[i][key] === '' ? '(blank)' : rows[i][key];
-      map.set(k, (map.get(k) || 0) + 1);
+      var value = rows[i][field] === '' ? '(blank)' : rows[i][field];
+      counts.set(value, (counts.get(value) || 0) + 1);
     }
-    return Array.from(map.entries())
+    return Array.from(counts.entries())
       .sort(function (a, b) { return b[1] - a[1]; })
-      .map(function (e) { return { value: e[0], rows: e[1] }; });
+      .map(function (entry) { return { value: entry[0], rows: entry[1] }; });
   };
 
   /* ---------------- paging ---------------- */
   var findPager = function (table) {
     if (!table) return null;
-    var id = table.id;
-    var lists = document.querySelectorAll('ul.pagination');
-    for (var i = 0; i < lists.length; i++) {
-      var prev = lists[i].querySelector('button.page-link.previous');
-      var next = lists[i].querySelector('button.page-link.next');
-      if (!prev || !next) continue;
-      if (id && prev.getAttribute('aria-controls') !== id) continue;
-      return { list: lists[i], prev: prev, next: next };
+    var tableId = table.id;
+    var pagers = document.querySelectorAll('ul.pagination');
+    for (var i = 0; i < pagers.length; i++) {
+      var previous = pagers[i].querySelector('button.page-link.previous');
+      var next = pagers[i].querySelector('button.page-link.next');
+      if (!previous || !next) continue;
+      if (tableId && previous.getAttribute('aria-controls') !== tableId) continue;
+      return { list: pagers[i], previous: previous, next: next };
     }
     return null;
   };
 
-  var isPagerDisabled = function (btn) {
-    if (!btn) return true;
-    if (btn.disabled) return true;
-    if (btn.getAttribute('aria-disabled') === 'true') return true;
-    var li = btn.parentNode;
-    return !!(li && li.className && /(^|\s)disabled(\s|$)/.test(li.className));
+  var isPagerDisabled = function (control) {
+    if (!control) return true;
+    if (control.disabled) return true;
+    if (control.getAttribute('aria-disabled') === 'true') return true;
+    var listItem = control.parentNode;
+    return !!(listItem && listItem.className && /(^|\s)disabled(\s|$)/.test(listItem.className));
   };
 
   var pagerState = function (pager) {
     if (!pager) return null;
     var active = pager.list.querySelector('li.active button.page-link') || pager.list.querySelector('button[aria-current="page"]');
-    var btns = pager.list.querySelectorAll('button.page-link[data-dt-idx]');
-    var current = 0;
-    var total = 0;
-    for (var i = 0; i < btns.length; i++) {
-      var d = btns[i].getAttribute('data-dt-idx');
-      if (!/^\d+$/.test(d)) continue;
-      var n = parseInt(d, 10) + 1;
-      if (n > total) total = n;
-      if (active && btns[i] === active) current = n;
+    var buttons = pager.list.querySelectorAll('button.page-link[data-dt-idx]');
+    var currentPage = 0;
+    var totalPages = 0;
+    for (var i = 0; i < buttons.length; i++) {
+      var index = buttons[i].getAttribute('data-dt-idx');
+      if (!/^\d+$/.test(index)) continue;
+      var pageNumber = parseInt(index, 10) + 1;
+      if (pageNumber > totalPages) totalPages = pageNumber;
+      if (active && buttons[i] === active) currentPage = pageNumber;
     }
-    if (!current && active) {
-      var a = active.getAttribute('data-dt-idx');
-      if (/^\d+$/.test(a)) current = parseInt(a, 10) + 1;
+    if (!currentPage && active) {
+      var activeIndex = active.getAttribute('data-dt-idx');
+      if (/^\d+$/.test(activeIndex)) currentPage = parseInt(activeIndex, 10) + 1;
     }
-    return { current: current, total: total, atFirst: isPagerDisabled(pager.prev), atLast: isPagerDisabled(pager.next) };
+    return {
+      currentPage: currentPage,
+      totalPages: totalPages,
+      atFirstPage: isPagerDisabled(pager.previous),
+      atLastPage: isPagerDisabled(pager.next)
+    };
   };
 
   var updatePagingButtons = function () {
-    if (!el.prev || !el.next) return;
+    if (!ui.previousPage || !ui.nextPage) return;
     var pager = findPager(pickTable());
-    var st = pagerState(pager);
-    var off = !pager || !st;
-    el.prev.disabled = off || st.atFirst;
-    el.next.disabled = off || st.atLast;
-    el.pageinfo.textContent = st && st.total ? 'Page ' + st.current + ' of ' + st.total : '';
+    var pagerInfo = pagerState(pager);
+    var pagingOff = !pager || !pagerInfo;
+    ui.previousPage.disabled = pagingOff || pagerInfo.atFirstPage;
+    ui.nextPage.disabled = pagingOff || pagerInfo.atLastPage;
+    ui.pageInfo.textContent = pagerInfo && pagerInfo.totalPages
+      ? 'Page ' + pagerInfo.currentPage + ' of ' + pagerInfo.totalPages
+      : '';
   };
 
   var goToPage = function (direction) {
     var pager = findPager(pickTable());
-    var st = pagerState(pager);
-    if (!pager || !st) {
+    var pagerInfo = pagerState(pager);
+    if (!pager || !pagerInfo) {
       status = 'No pagination found for this table.';
       render();
       return;
     }
-    var btn = direction === 'previous' ? pager.prev : pager.next;
-    if (isPagerDisabled(btn)) {
+    var pageButton = direction === 'previous' ? pager.previous : pager.next;
+    if (isPagerDisabled(pageButton)) {
       status = direction === 'previous' ? 'Already on the first page.' : 'Already on the last page.';
       render();
       return;
     }
-    btn.click();
+    pageButton.click();
     scrollToTop();
     setTimeout(updatePagingButtons, 0);
   };
 
-  var scrollToEnd = function () {
-    var doc = document.documentElement;
-    var y = Math.max(doc.scrollHeight, document.body ? document.body.scrollHeight : 0);
-    window.scrollTo({ top: y, behavior: 'smooth' });
-    status = 'Jumped to the end of the page.';
+  /* ---------------- scrolling ---------------- */
+  var jumpTo = function (top, message) {
+    window.scrollTo({ top: top, behavior: 'smooth' });
+    status = message;
     render();
   };
 
   var scrollToTop = function () {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    status = 'Jumped to the top of the page.';
-    render();
+    jumpTo(0, 'Jumped to the top of the page.');
+  };
+
+  var scrollToEnd = function () {
+    var documentHeight = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+    jumpTo(documentHeight, 'Jumped to the end of the page.');
   };
 
   /* ---------------- actions ---------------- */
-  var state = load();
+  var state = loadState();
   var status = '';
 
   var addCurrentPage = function () {
@@ -301,21 +277,21 @@
     if (page.error) { status = page.error; render(); return; }
     if (!page.rows.length) { status = 'That page had no data rows.'; render(); return; }
 
-    var seen = new Set(state.rows.map(function (r) { return r.key; }));
-    var batchSeen = new Set();
-    var fresh = 0;
-    var dupes = 0;
+    var knownKeys = new Set(state.rows.map(function (row) { return row.key; }));
+    var batchKeys = new Set();
+    var freshRows = 0;
+    var duplicateRows = 0;
     page.rows.forEach(function (row) {
-      if (seen.has(row.key) || batchSeen.has(row.key)) { dupes += 1; return; }
-      batchSeen.add(row.key);
+      if (knownKeys.has(row.key) || batchKeys.has(row.key)) { duplicateRows += 1; return; }
+      batchKeys.add(row.key);
       state.rows.push(row);
-      fresh += 1;
+      freshRows += 1;
     });
 
-    save(state);
-    status = fresh
-      ? '+' + fresh + ' row' + (fresh === 1 ? '' : 's') + ' added' + (dupes ? ' (' + dupes + ' already counted)' : '')
-      : 'Nothing new on this page (' + dupes + ' already counted)';
+    saveState(state);
+    status = freshRows
+      ? '+' + freshRows + ' row' + (freshRows === 1 ? '' : 's') + ' added' + (duplicateRows ? ' (' + duplicateRows + ' already counted)' : '')
+      : 'Nothing new on this page (' + duplicateRows + ' already counted)';
 
     report();
     render();
@@ -323,7 +299,7 @@
 
   var reset = function () {
     state = { rows: [] };
-    save(state);
+    saveState(state);
     status = 'Counters cleared.';
     report();
     render();
@@ -332,23 +308,23 @@
   var buildSnapshot = function () {
     return {
       summary: summarise(state.rows),
-      startedValues: frequency(state.rows, 'started'),
-      finishedValues: frequency(state.rows, 'finished'),
+      startedValues: valueCounts(state.rows, 'started'),
+      finishedValues: valueCounts(state.rows, 'finished'),
       rows: state.rows
     };
   };
 
   var report = function () {
-    var snap = buildSnapshot();
-    window.__rowcounts = snap;
-    console.log('%c[rowcounts]', 'font-weight:bold', snap.summary.rows + ' rows accumulated');
-    console.table(snap.summary);
-    console.log('Started column values', snap.startedValues);
-    console.log('Finished column values', snap.finishedValues);
+    var snapshot = buildSnapshot();
+    window.__rowcounts = snapshot;
+    console.log('%c[rowcounts]', 'font-weight:bold', snapshot.summary.rows + ' rows accumulated');
+    console.table(snapshot.summary);
+    console.log('Started column values', snapshot.startedValues);
+    console.log('Finished column values', snapshot.finishedValues);
   };
 
   /* ---------------- panel ---------------- */
-  var el = {};
+  var ui = {};
 
   var buildPanel = function () {
     var panel = document.createElement('div');
@@ -388,53 +364,52 @@
 
     document.body.appendChild(panel);
 
-    var q = function (role) { return panel.querySelector('[data-role="' + role + '"]'); };
-    el.totals = q('totals');
-    el.status = q('status');
-    el.notice = q('notice');
-    el.body = q('body');
-    el.panel = panel;
-    el.prev = q('prev');
-    el.next = q('next');
-    el.pageinfo = q('pageinfo');
+    var find = function (role) { return panel.querySelector('[data-role="' + role + '"]'); };
+    ui.totals = find('totals');
+    ui.status = find('status');
+    ui.notice = find('notice');
+    ui.body = find('body');
+    ui.panel = panel;
+    ui.previousPage = find('prev');
+    ui.nextPage = find('next');
+    ui.pageInfo = find('pageinfo');
 
-    q('prev').addEventListener('click', function () { goToPage('previous'); });
-    q('next').addEventListener('click', function () { goToPage('next'); });
-    q('add').addEventListener('click', addCurrentPage);
-    q('top').addEventListener('click', scrollToTop);
-    q('end').addEventListener('click', scrollToEnd);
-    q('reset').addEventListener('click', function () { reset(); });
-    q('close').addEventListener('click', function () { panel.remove(); });
-    q('collapse').addEventListener('click', function () {
-      var hidden = el.body.style.display === 'none';
-      el.body.style.display = hidden ? '' : 'none';
+    find('prev').addEventListener('click', function () { goToPage('previous'); });
+    find('next').addEventListener('click', function () { goToPage('next'); });
+    find('add').addEventListener('click', addCurrentPage);
+    find('top').addEventListener('click', scrollToTop);
+    find('end').addEventListener('click', scrollToEnd);
+    find('reset').addEventListener('click', function () { reset(); });
+    find('close').addEventListener('click', function () { panel.remove(); });
+    find('collapse').addEventListener('click', function () {
+      var hidden = ui.body.style.display === 'none';
+      ui.body.style.display = hidden ? '' : 'none';
       this.innerHTML = hidden ? '&#8211;' : '+';
     });
   };
 
   var render = function () {
-    var s = summarise(state.rows);
-    var line = function (label, value) {
+    if (!ui.totals) return;
+    var summary = summarise(state.rows);
+    var statRow = function (label, value) {
       return '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:#555">' + label + '</span><strong>' + value + '</strong></div>';
     };
-    el.totals.innerHTML = [
-      line('Total Rows', s.rows),
-      line('Started', s.startedY),
-      line('Finished', s.finishedY),
-      line('Currently taking', s.startedNotFinished)
+    ui.totals.innerHTML = [
+      statRow('Total Rows', summary.rows),
+      statRow('Started', summary.startedY),
+      statRow('Finished', summary.finishedY),
+      statRow('Currently taking', summary.startedNotFinished)
     ].join('');
-    var odd = s.startedOther + s.finishedOther;
-    el.notice.textContent = odd
-      ? odd + ' cell' + (odd === 1 ? '' : 's') + ' not Y/N - see console'
+    var unrecognisedCells = summary.startedOther + summary.finishedOther;
+    ui.notice.textContent = unrecognisedCells
+      ? unrecognisedCells + ' cell' + (unrecognisedCells === 1 ? '' : 's') + ' not Y/N - see console'
       : '';
-    el.status.textContent = status;
+    ui.status.textContent = status;
     window.__rowcounts = buildSnapshot();
     updatePagingButtons();
   };
 
   /* ---------------- go ---------------- */
-  scrubLegacy();
-
   if (document.getElementById(PANEL_ID)) {
     status = 'Already running here. Click "Add this page" after each page change.';
     render();
