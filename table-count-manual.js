@@ -14,11 +14,11 @@
  * Usage:
  *   - Run once on the submissions page (DevTools snippet, or the javascript:
  *     bookmarklet in table-count-manual.txt).
- *   - Page through however you like and press "Add this page" on each page.
- *   - Press "End of Page" to jump to the bottom of the page (where the
- *     pagination controls usually sit) before choosing the next page.
- *   - Pressing "Add this page" twice on the same page adds nothing (rows are
- *     de-duplicated).
+ *   - Page through however you like: "Previous Page" and "Next Page" click the
+ *     table's own pager for you and jump to the top, or scroll yourself with
+ *     "Top of Page" / "End of Page".
+ *   - Press "Add this page" on each page. Pressing it twice on the same page
+ *     adds nothing (rows are de-duplicated).
  *
  * Privacy:
  *   - No name is ever stored, printed, or copied.
