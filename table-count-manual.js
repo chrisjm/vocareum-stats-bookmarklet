@@ -206,6 +206,78 @@
       .map(function (e) { return { value: e[0], rows: e[1] }; });
   };
 
+  /* ---------------- paging ---------------- */
+  var findPager = function (table) {
+    if (!table) return null;
+    var id = table.id;
+    var lists = document.querySelectorAll('ul.pagination');
+    for (var i = 0; i < lists.length; i++) {
+      var prev = lists[i].querySelector('button.page-link.previous');
+      var next = lists[i].querySelector('button.page-link.next');
+      if (!prev || !next) continue;
+      if (id && prev.getAttribute('aria-controls') !== id) continue;
+      return { list: lists[i], prev: prev, next: next };
+    }
+    return null;
+  };
+
+  var isPagerDisabled = function (btn) {
+    if (!btn) return true;
+    if (btn.disabled) return true;
+    if (btn.getAttribute('aria-disabled') === 'true') return true;
+    var li = btn.parentNode;
+    return !!(li && li.className && /(^|\s)disabled(\s|$)/.test(li.className));
+  };
+
+  var pagerState = function (pager) {
+    if (!pager) return null;
+    var active = pager.list.querySelector('li.active button.page-link') || pager.list.querySelector('button[aria-current="page"]');
+    var btns = pager.list.querySelectorAll('button.page-link[data-dt-idx]');
+    var current = 0;
+    var total = 0;
+    for (var i = 0; i < btns.length; i++) {
+      var d = btns[i].getAttribute('data-dt-idx');
+      if (!/^\d+$/.test(d)) continue;
+      var n = parseInt(d, 10) + 1;
+      if (n > total) total = n;
+      if (active && btns[i] === active) current = n;
+    }
+    if (!current && active) {
+      var a = active.getAttribute('data-dt-idx');
+      if (/^\d+$/.test(a)) current = parseInt(a, 10) + 1;
+    }
+    return { current: current, total: total, atFirst: isPagerDisabled(pager.prev), atLast: isPagerDisabled(pager.next) };
+  };
+
+  var updatePagingButtons = function () {
+    if (!el.prev || !el.next) return;
+    var pager = findPager(pickTable());
+    var st = pagerState(pager);
+    var off = !pager || !st;
+    el.prev.disabled = off || st.atFirst;
+    el.next.disabled = off || st.atLast;
+    el.pageinfo.textContent = st && st.total ? 'Page ' + st.current + ' of ' + st.total : '';
+  };
+
+  var goToPage = function (direction) {
+    var pager = findPager(pickTable());
+    var st = pagerState(pager);
+    if (!pager || !st) {
+      status = 'No pagination found for this table.';
+      render();
+      return;
+    }
+    var btn = direction === 'previous' ? pager.prev : pager.next;
+    if (isPagerDisabled(btn)) {
+      status = direction === 'previous' ? 'Already on the first page.' : 'Already on the last page.';
+      render();
+      return;
+    }
+    btn.click();
+    scrollToTop();
+    setTimeout(updatePagingButtons, 0);
+  };
+
   var scrollToEnd = function () {
     var doc = document.documentElement;
     var y = Math.max(doc.scrollHeight, document.body ? document.body.scrollHeight : 0);
@@ -305,6 +377,11 @@
       '<button data-role="end" style="cursor:pointer;border:1px solid #d0d0d0;background:#f7f7f7;border-radius:6px;padding:5px 9px;font:inherit">End of Page</button>',
       '<button data-role="reset" style="cursor:pointer;border:1px solid #d0d0d0;background:#f7f7f7;border-radius:6px;padding:5px 9px;font:inherit">Reset</button>',
       '</div>',
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">',
+      '<button data-role="prev" style="cursor:pointer;border:1px solid #d0d0d0;background:#f7f7f7;border-radius:6px;padding:5px 9px;font:inherit">Previous Page</button>',
+      '<button data-role="next" style="cursor:pointer;border:1px solid #d0d0d0;background:#f7f7f7;border-radius:6px;padding:5px 9px;font:inherit">Next Page</button>',
+      '</div>',
+      '<div data-role="pageinfo" style="color:#555;margin-bottom:2px"></div>',
       '<div data-role="status" style="color:#555;min-height:1.3em"></div>',
       '</div>'
     ].join('');
@@ -317,7 +394,12 @@
     el.notice = q('notice');
     el.body = q('body');
     el.panel = panel;
+    el.prev = q('prev');
+    el.next = q('next');
+    el.pageinfo = q('pageinfo');
 
+    q('prev').addEventListener('click', function () { goToPage('previous'); });
+    q('next').addEventListener('click', function () { goToPage('next'); });
     q('add').addEventListener('click', addCurrentPage);
     q('top').addEventListener('click', scrollToTop);
     q('end').addEventListener('click', scrollToEnd);
@@ -347,6 +429,7 @@
       : '';
     el.status.textContent = status;
     window.__rowcounts = buildSnapshot();
+    updatePagingButtons();
   };
 
   /* ---------------- go ---------------- */
