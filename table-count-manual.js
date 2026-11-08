@@ -214,6 +214,12 @@
     render();
   };
 
+  var scrollToTop = function () {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    status = 'Jumped to the top of the page.';
+    render();
+  };
+
   /* ---------------- actions ---------------- */
   var state = load();
   var status = '';
@@ -295,6 +301,7 @@
       '<div data-role="notice" style="color:#a15c00;margin-bottom:6px"></div>',
       '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">',
       '<button data-role="add" style="cursor:pointer;border:1px solid #111;background:#111;color:#fff;border-radius:6px;padding:5px 9px;font:inherit">Add this page</button>',
+      '<button data-role="top" style="cursor:pointer;border:1px solid #d0d0d0;background:#f7f7f7;border-radius:6px;padding:5px 9px;font:inherit">Top of Page</button>',
       '<button data-role="end" style="cursor:pointer;border:1px solid #d0d0d0;background:#f7f7f7;border-radius:6px;padding:5px 9px;font:inherit">End of Page</button>',
       '<button data-role="reset" style="cursor:pointer;border:1px solid #d0d0d0;background:#f7f7f7;border-radius:6px;padding:5px 9px;font:inherit">Reset</button>',
       '</div>',
@@ -312,6 +319,7 @@
     el.panel = panel;
 
     q('add').addEventListener('click', addCurrentPage);
+    q('top').addEventListener('click', scrollToTop);
     q('end').addEventListener('click', scrollToEnd);
     q('reset').addEventListener('click', function () { reset(); });
     q('close').addEventListener('click', function () { panel.remove(); });
