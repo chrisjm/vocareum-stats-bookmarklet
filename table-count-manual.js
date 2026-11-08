@@ -313,9 +313,7 @@
 
     q('add').addEventListener('click', addCurrentPage);
     q('end').addEventListener('click', scrollToEnd);
-    q('reset').addEventListener('click', function () {
-      if (window.confirm('Clear the ' + state.rows.length + ' rows you have counted?')) reset();
-    });
+    q('reset').addEventListener('click', function () { reset(); });
     q('close').addEventListener('click', function () { panel.remove(); });
     q('collapse').addEventListener('click', function () {
       var hidden = el.body.style.display === 'none';
@@ -330,7 +328,7 @@
       return '<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:#555">' + label + '</span><strong>' + value + '</strong></div>';
     };
     el.totals.innerHTML = [
-      line('Total', s.rows),
+      line('Total Rows', s.rows),
       line('Started', s.startedY),
       line('Finished', s.finishedY),
       line('Currently taking', s.startedNotFinished)
