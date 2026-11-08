@@ -121,6 +121,9 @@
     if (startedColumn < 0 && finishedColumn < 0) {
       return { error: 'Could not find Started/Finished columns. Headers: ' + headers.join(' | ') };
     }
+    if (finishedColumn < 0) {
+      return { error: 'No "Finished" column on this table - that usually means the assignment is not currently running (e.g. an exam), so nothing was added.' };
+    }
 
     var requiredCells = Math.max(startedColumn, finishedColumn) + 1;
 
