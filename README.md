@@ -11,6 +11,11 @@ build step that turns it into a copy/paste bookmarklet.
 | `table-count-manual.txt` | **Generated.** The `javascript:void …` bookmarklet. Do not hand-edit. |
 | `make-bookmarklet.mjs` | The build step. No dependencies. |
 
+## AI assistance
+
+Built with AI assistance: Pi (the coding agent harness) driving the
+`deepseek/deepseek-v4.1-flash` model.
+
 ## Installing the bookmarklet
 
 A bookmarklet is just a bookmark whose "URL" is a line of JavaScript. Every
