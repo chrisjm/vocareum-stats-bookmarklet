@@ -28,10 +28,6 @@ First, copy the whole single line from `table-count-manual.txt` — the entire
 3. **Name**: `Vocareum tally`. **Location**: paste the `javascript:` line.
 4. **Add**.
 
-Alternatively, click the star in the address bar, then **Edit this bookmark**
-and replace its **Location** field. If Firefox refuses the pasted `javascript:`
-URL there, use the Library route above.
-
 ### Chrome / Edge / Brave / Opera
 
 1. Show the bookmarks bar with `Ctrl/Cmd+Shift+B`.
